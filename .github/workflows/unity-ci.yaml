@@ -233,6 +233,7 @@ jobs:
     name: Build ${{ matrix.name }}
     needs:
       - test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped' || (github.event_name == 'workflow_dispatch' && !inputs.runTests)) }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
