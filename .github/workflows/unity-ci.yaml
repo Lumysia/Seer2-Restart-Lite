@@ -132,14 +132,13 @@ jobs:
         run: |
           license_file=$(find . -type f -name '*.ulf' -print -quit)
           test -n "$license_file"
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          from pathlib import Path
-
-          content = Path("$license_file").read_text()
-          print("content<<EOF")
-          print(content, end="" if content.endswith("\n") else "\n")
-          print("EOF")
-          PY
+          delimiter="UNITY_LICENSE_$(date +%s)_$RANDOM"
+          {
+            echo "content<<$delimiter"
+            cat "$license_file"
+            echo
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Detect access token availability
         id: access_token
@@ -242,7 +241,6 @@ jobs:
     name: Build ${{ matrix.name }}
     needs:
       - test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && matrix.enabled }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -293,12 +291,14 @@ jobs:
               build/StandaloneOSX/**/UnityPlayer*.txt
     steps:
       - name: Checkout repository
+        if: ${{ matrix.enabled }}
         uses: actions/checkout@v5
         with:
           lfs: true
           fetch-depth: 0
 
       - name: Cache Library
+        if: ${{ matrix.enabled }}
         uses: actions/cache@v4
         with:
           path: Library
@@ -308,6 +308,7 @@ jobs:
             Library-${{ matrix.cacheScope }}-
 
       - name: Build ${{ matrix.name }} player
+        if: ${{ matrix.enabled }}
         uses: game-ci/unity-builder@v4
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
@@ -321,6 +322,7 @@ jobs:
           buildsPath: build
 
       - name: Upload ${{ matrix.name }} artifact
+        if: ${{ matrix.enabled }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifactName }}
@@ -329,7 +331,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload ${{ matrix.name }} logs
-        if: always()
+        if: ${{ always() && matrix.enabled }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.logsArtifactName }}
