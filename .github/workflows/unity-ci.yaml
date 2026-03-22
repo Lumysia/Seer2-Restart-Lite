@@ -99,8 +99,6 @@ jobs:
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
       - name: Install license tools
         run: npm install --global unity-license-activate
