@@ -80,7 +80,6 @@ jobs:
         with:
           projectPath: .
           unityVersion: ${{ env.UNITY_VERSION }}
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
           testMode: ${{ matrix.testMode }}
           artifactsPath: artifacts/test-results/${{ matrix.testMode }}
 
