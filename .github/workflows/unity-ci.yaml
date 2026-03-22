@@ -239,7 +239,6 @@ jobs:
       matrix:
         include:
           - name: Android
-            enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildAndroid }}
             cacheScope: build-android
             targetPlatform: Android
             artifactName: build-android
@@ -250,7 +249,6 @@ jobs:
               build/Android/**/output.log
               build/Android/**/UnityPlayer*.txt
           - name: Windows
-            enabled: ${{ github.event_name != 'workflow_dispatch' || inputs.buildWindows }}
             cacheScope: build-windows
             targetPlatform: StandaloneWindows64
             artifactName: build-windows
@@ -261,7 +259,6 @@ jobs:
               build/StandaloneWindows64/**/output.log
               build/StandaloneWindows64/**/UnityPlayer*.txt
           - name: WebGL
-            enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildWebGL }}
             cacheScope: build-webgl
             targetPlatform: WebGL
             artifactName: build-webgl
@@ -271,7 +268,6 @@ jobs:
               build/WebGL/**/*.log
               build/WebGL/**/output.log
           - name: macOS
-            enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildMacOS }}
             cacheScope: build-macos
             targetPlatform: StandaloneOSX
             artifactName: build-macos
@@ -281,16 +277,15 @@ jobs:
               build/StandaloneOSX/**/*.log
               build/StandaloneOSX/**/output.log
               build/StandaloneOSX/**/UnityPlayer*.txt
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && ((matrix.targetPlatform == 'Android' && github.event_name == 'workflow_dispatch' && inputs.buildAndroid) || (matrix.targetPlatform == 'StandaloneWindows64' && (github.event_name != 'workflow_dispatch' || inputs.buildWindows)) || (matrix.targetPlatform == 'WebGL' && github.event_name == 'workflow_dispatch' && inputs.buildWebGL) || (matrix.targetPlatform == 'StandaloneOSX' && github.event_name == 'workflow_dispatch' && inputs.buildMacOS)) }}
     steps:
       - name: Checkout repository
-        if: ${{ matrix.enabled }}
         uses: actions/checkout@v5
         with:
           lfs: true
           fetch-depth: 0
 
       - name: Cache Library
-        if: ${{ matrix.enabled }}
         uses: actions/cache@v4
         with:
           path: Library
@@ -300,7 +295,6 @@ jobs:
             Library-${{ matrix.cacheScope }}-
 
       - name: Build ${{ matrix.name }} player
-        if: ${{ matrix.enabled }}
         uses: game-ci/unity-builder@v4
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
@@ -314,7 +308,6 @@ jobs:
           buildsPath: build
 
       - name: Upload ${{ matrix.name }} artifact
-        if: ${{ matrix.enabled }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifactName }}
@@ -323,7 +316,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload ${{ matrix.name }} logs
-        if: ${{ always() && matrix.enabled }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.logsArtifactName }}
