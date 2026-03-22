@@ -27,6 +27,11 @@ on:
         required: false
         default: false
         type: boolean
+      buildMacOS:
+        description: Build macOS
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -384,5 +389,60 @@ jobs:
           path: |
             build/WebGL/**/*.log
             build/WebGL/**/output.log
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
+
+  build_macos:
+    name: Build macOS
+    needs:
+      - test
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildMacOS && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-build-macos-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            Library-build-macos-${{ env.UNITY_VERSION }}-
+            Library-build-macos-
+
+      - name: Build macOS player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: StandaloneOSX
+          buildsPath: build
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-macos
+          path: build/StandaloneOSX
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+
+      - name: Upload macOS logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-macos
+          path: |
+            build/StandaloneOSX/**/*.log
+            build/StandaloneOSX/**/output.log
+            build/StandaloneOSX/**/UnityPlayer*.txt
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
           if-no-files-found: ignore
