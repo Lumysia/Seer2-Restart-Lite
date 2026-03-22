@@ -157,6 +157,7 @@ jobs:
       - name: Update UNITY_LICENSE
         env:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.ACCESS_TOKEN }}
           LICENSE_CONTENT: ${{ steps.license_content.outputs.content }}
         run: |
           if [[ -z "${ACCESS_TOKEN:-}" ]]; then
