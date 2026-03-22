@@ -112,6 +112,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
 
+      - name: Set up GitHub CLI
+        uses: actions4gh/setup-gh@v1
+        with:
+          token: ${{ secrets.ACCESS_TOKEN }}
+
       - name: Install license tools
         run: npm install --global unity-license-activate unity-verify-code
 
@@ -140,40 +145,17 @@ jobs:
             echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Detect access token availability
-        id: access_token
+      - name: Update UNITY_LICENSE
         env:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          LICENSE_CONTENT: ${{ steps.license_content.outputs.content }}
         run: |
-          if [[ -n "${ACCESS_TOKEN:-}" ]]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
+          if [[ -z "${ACCESS_TOKEN:-}" ]]; then
+            echo "ACCESS_TOKEN is required to update UNITY_LICENSE" >&2
+            exit 1
           fi
 
-      - name: Update UNITY_LICENSE with access token
-        id: update_with_access_token
-        if: ${{ steps.access_token.outputs.available == 'true' }}
-        uses: hmanzur/actions-set-secret@v2.0.0
-        with:
-          name: UNITY_LICENSE
-          value: ${{ steps.license_content.outputs.content }}
-          token: ${{ secrets.ACCESS_TOKEN }}
-
-      - name: Update UNITY_LICENSE with GitHub App token
-        id: update_with_app_token
-        if: ${{ always() && steps.update_with_access_token.outcome == 'failure' && github.token != '' }}
-        uses: hmanzur/actions-set-secret@v2.0.0
-        with:
-          name: UNITY_LICENSE
-          value: ${{ steps.license_content.outputs.content }}
-          token: ${{ github.token }}
-
-      - name: Validate secret update
-        if: ${{ steps.update_with_access_token.outcome != 'success' && steps.update_with_app_token.outcome != 'success' }}
-        run: |
-          echo "Failed to update UNITY_LICENSE with ACCESS_TOKEN and github.token" >&2
-          exit 1
+          gh secret set UNITY_LICENSE --body "$LICENSE_CONTENT"
 
   test:
     name: Test ${{ matrix.testMode }}
