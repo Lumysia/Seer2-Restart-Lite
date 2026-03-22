@@ -76,52 +76,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  activate-license:
-    name: Activate Unity License
-    runs-on: ubuntu-latest
-    container:
-      image: unityci/editor:ubuntu-2022.3.62f2-android-3
-      options: --user root
-    
-    outputs:
-      license: ${{ steps.license.outputs.license }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          lfs: true
-          fetch-depth: 0
-      
-      - name: Cache Unity Library
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: |
-            Library-
-      
-      - name: Activate Unity License
-        id: license
-        uses: game-ci/unity-license-activate@v2
-        with:
-          unityLicense: ${{ secrets.UNITY_LICENSE }}
-          unityEmail: ${{ secrets.UNITY_EMAIL }}
-          unityPassword: ${{ secrets.UNITY_PASSWORD }}
-          unitySerial: ${{ secrets.UNITY_SERIAL }}
-        continue-on-error: false
-      
-      - name: Verify License Activation
-        run: |
-          echo "License activation completed successfully"
-          echo "Unity version: ${{ env.UNITY_VERSION }}"
-
   test:
     name: Run Unity Tests
-    needs: activate-license
     runs-on: ubuntu-latest
     if: |
-      (github.event_name != 'workflow_dispatch') || 
+      (github.event_name != 'workflow_dispatch') ||
       (github.event.inputs.run_tests == 'true')
     container:
       image: unityci/editor:ubuntu-2022.3.62f2-android-3
@@ -141,16 +100,13 @@ jobs:
           restore-keys: |
             Library-
       
-      - name: Restore Unity License
-        uses: game-ci/unity-license-activate@v2
-        with:
-          unityLicense: ${{ secrets.UNITY_LICENSE }}
-          unityEmail: ${{ secrets.UNITY_EMAIL }}
-          unityPassword: ${{ secrets.UNITY_PASSWORD }}
-      
       - name: Run EditMode Tests
         id: editmode-tests
         uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: .
           testMode: EditMode
@@ -162,6 +118,10 @@ jobs:
       - name: Run PlayMode Tests
         id: playmode-tests
         uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: .
           testMode: PlayMode
@@ -198,10 +158,9 @@ jobs:
 
   build-android:
     name: Build Android
-    needs: activate-license
     runs-on: ubuntu-latest
     if: |
-      (github.event_name != 'workflow_dispatch') || 
+      (github.event_name != 'workflow_dispatch') ||
       (github.event.inputs.build_android == 'true')
     container:
       image: unityci/editor:ubuntu-2022.3.62f2-android-3
@@ -222,22 +181,19 @@ jobs:
           restore-keys: |
             Library-
       
-      - name: Restore Unity License
-        uses: game-ci/unity-license-activate@v2
-        with:
-          unityLicense: ${{ secrets.UNITY_LICENSE }}
-          unityEmail: ${{ secrets.UNITY_EMAIL }}
-          unityPassword: ${{ secrets.UNITY_PASSWORD }}
-      
       - name: Build Android APK
         id: build-apk
         uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
         with:
           targetPlatform: Android
           projectPath: .
           buildName: ${{ env.PROJECT_NAME }}
           buildsPath: build
-          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
           version: ${{ env.BUNDLE_VERSION }}
           androidVersionCode: ${{ github.run_number }}
           androidExportType: androidPackage
@@ -246,23 +202,25 @@ jobs:
           androidTargetArchitectures: ${{ env.ANDROID_TARGET_ARCHITECTURES }}
           androidScriptingBackend: IL2CPP
           androidCreateSymbols: public
-        env:
-          BUILD_SCENES: ${{ env.BUILD_SCENES }}
       
       - name: Build Android App Bundle (AAB)
         id: build-aab
         if: |
-          (github.event_name == 'workflow_dispatch' && 
+          (github.event_name == 'workflow_dispatch' &&
            github.event.inputs.build_aab == 'true') ||
-          (github.event_name == 'push' && 
+          (github.event_name == 'push' &&
            github.ref == 'refs/heads/main')
         uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
         with:
           targetPlatform: Android
           projectPath: .
           buildName: ${{ env.PROJECT_NAME }}
           buildsPath: build
-          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
           version: ${{ env.BUNDLE_VERSION }}
           androidVersionCode: ${{ github.run_number }}
           androidExportType: androidAppBundle
@@ -270,8 +228,6 @@ jobs:
           androidMinSdkVersion: AndroidApiLevel${{ env.ANDROID_MIN_SDK }}
           androidTargetArchitectures: ${{ env.ANDROID_TARGET_ARCHITECTURES }}
           androidScriptingBackend: IL2CPP
-        env:
-          BUILD_SCENES: ${{ env.BUILD_SCENES }}
       
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
@@ -308,10 +264,9 @@ jobs:
 
   build-windows:
     name: Build Windows (Standalone)
-    needs: activate-license
     runs-on: ubuntu-latest
     if: |
-      (github.event_name != 'workflow_dispatch') || 
+      (github.event_name != 'workflow_dispatch') ||
       (github.event.inputs.build_windows == 'true')
     container:
       image: unityci/editor:ubuntu-2022.3.62f2-windows-mono-3
@@ -332,27 +287,22 @@ jobs:
           restore-keys: |
             Library-
       
-      - name: Restore Unity License
-        uses: game-ci/unity-license-activate@v2
-        with:
-          unityLicense: ${{ secrets.UNITY_LICENSE }}
-          unityEmail: ${{ secrets.UNITY_EMAIL }}
-          unityPassword: ${{ secrets.UNITY_PASSWORD }}
-      
       - name: Build StandaloneWindows64
         id: build-windows
         uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
         with:
           targetPlatform: StandaloneWindows64
           projectPath: .
           buildName: ${{ env.PROJECT_NAME }}
           buildsPath: build
-          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
           version: ${{ env.BUNDLE_VERSION }}
           scriptingBackend: mono
           developmentBuild: false
-        env:
-          BUILD_SCENES: ${{ env.BUILD_SCENES }}
       
       - name: Upload Windows Build
         uses: actions/upload-artifact@v4
@@ -376,12 +326,11 @@ jobs:
 
   build-webgl:
     name: Build WebGL
-    needs: activate-license
     runs-on: ubuntu-latest
     if: |
-      (github.event_name == 'workflow_dispatch' && 
+      (github.event_name == 'workflow_dispatch' &&
        github.event.inputs.build_webgl == 'true') ||
-      (github.event_name == 'push' && 
+      (github.event_name == 'push' &&
        startsWith(github.ref, 'refs/tags/webgl-'))
     container:
       image: unityci/editor:ubuntu-2022.3.62f2-webgl-3
@@ -402,27 +351,22 @@ jobs:
           restore-keys: |
             Library-
       
-      - name: Restore Unity License
-        uses: game-ci/unity-license-activate@v2
-        with:
-          unityLicense: ${{ secrets.UNITY_LICENSE }}
-          unityEmail: ${{ secrets.UNITY_EMAIL }}
-          unityPassword: ${{ secrets.UNITY_PASSWORD }}
-      
       - name: Build WebGL
         id: build-webgl
         uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
         with:
           targetPlatform: WebGL
           projectPath: .
           buildName: ${{ env.PROJECT_NAME }}
           buildsPath: build
-          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
           version: ${{ env.BUNDLE_VERSION }}
           developmentBuild: false
           webglCompressionFormat: Brotli
-        env:
-          BUILD_SCENES: ${{ env.BUILD_SCENES }}
       
       - name: Upload WebGL Build
         uses: actions/upload-artifact@v4
@@ -445,7 +389,7 @@ jobs:
 
   build-addressables:
     name: Build Addressables Content
-    needs: [activate-license, build-android]
+    needs: [build-android]
     runs-on: ubuntu-latest
     if: |
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -453,6 +397,10 @@ jobs:
     container:
       image: unityci/editor:ubuntu-2022.3.62f2-android-3
       options: --user root
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+      UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
     
     steps:
       - name: Checkout repository
@@ -467,13 +415,6 @@ jobs:
           key: Library-Addressables-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
             Library-
-      
-      - name: Restore Unity License
-        uses: game-ci/unity-license-activate@v2
-        with:
-          unityLicense: ${{ secrets.UNITY_LICENSE }}
-          unityEmail: ${{ secrets.UNITY_EMAIL }}
-          unityPassword: ${{ secrets.UNITY_PASSWORD }}
       
       - name: Build Addressables Content
         run: |
