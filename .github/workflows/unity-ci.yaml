@@ -1,0 +1,267 @@
+name: Unity CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      runTests:
+        description: Run tests
+        required: false
+        default: true
+        type: boolean
+      buildAndroid:
+        description: Build Android
+        required: false
+        default: true
+        type: boolean
+      buildWindows:
+        description: Build Windows
+        required: false
+        default: true
+        type: boolean
+      buildWebGL:
+        description: Build WebGL
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  UNITY_VERSION: 2022.3.62f2
+  ARTIFACT_RETENTION_DAYS: 14
+
+jobs:
+  test:
+    name: Test ${{ matrix.testMode }}
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.runTests }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - testMode: EditMode
+            cacheScope: test-editmode
+          - testMode: PlayMode
+            cacheScope: test-playmode
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ matrix.cacheScope }}-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            Library-${{ matrix.cacheScope }}-${{ env.UNITY_VERSION }}-
+            Library-${{ matrix.cacheScope }}-
+
+      - name: Run Unity tests
+        uses: game-ci/unity-test-runner@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          testMode: ${{ matrix.testMode }}
+          artifactsPath: artifacts/test-results/${{ matrix.testMode }}
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.testMode }}
+          path: artifacts/test-results/${{ matrix.testMode }}
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.testMode }}
+          path: |
+            artifacts/test-results/${{ matrix.testMode }}/**/*.log
+            artifacts/test-results/${{ matrix.testMode }}/**/TestResults.xml
+            artifacts/test-results/${{ matrix.testMode }}/**/test-results.xml
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
+
+  build_android:
+    name: Build Android
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-build-android-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            Library-build-android-${{ env.UNITY_VERSION }}-
+            Library-build-android-
+
+      - name: Build Android player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: Android
+          buildsPath: build
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-android
+          path: build/Android
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+
+      - name: Upload Android logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-android
+          path: |
+            build/Android/**/*.log
+            build/Android/**/output.log
+            build/Android/**/UnityPlayer*.txt
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
+
+  build_windows:
+    name: Build Windows
+    needs: test
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-build-windows-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            Library-build-windows-${{ env.UNITY_VERSION }}-
+            Library-build-windows-
+
+      - name: Build Windows player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: StandaloneWindows64
+          buildsPath: build
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-windows
+          path: build/StandaloneWindows64
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+
+      - name: Upload Windows logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-windows
+          path: |
+            build/StandaloneWindows64/**/*.log
+            build/StandaloneWindows64/**/output.log
+            build/StandaloneWindows64/**/UnityPlayer*.txt
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
+
+  build_webgl:
+    name: Build WebGL
+    needs: test
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Cache Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-build-webgl-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          restore-keys: |
+            Library-build-webgl-${{ env.UNITY_VERSION }}-
+            Library-build-webgl-
+
+      - name: Build WebGL player
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: WebGL
+          buildsPath: build
+
+      - name: Upload WebGL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-webgl
+          path: build/WebGL
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+
+      - name: Upload WebGL logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-webgl
+          path: |
+            build/WebGL/**/*.log
+            build/WebGL/**/output.log
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
