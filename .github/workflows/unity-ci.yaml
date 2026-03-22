@@ -111,9 +111,20 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
+      - name: Detect access token availability
+        id: access_token
+        env:
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        run: |
+          if [[ -n "${ACCESS_TOKEN:-}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Update UNITY_LICENSE with access token
         id: update_with_access_token
-        if: ${{ secrets.ACCESS_TOKEN != '' }}
+        if: ${{ steps.access_token.outputs.available == 'true' }}
         uses: hmanzur/actions-set-secret@v2.0.0
         with:
           name: UNITY_LICENSE
