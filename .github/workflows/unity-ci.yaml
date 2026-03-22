@@ -47,6 +47,7 @@ jobs:
   refresh_license:
     name: Refresh Unity license
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     permissions:
       actions: read
       contents: read
@@ -60,26 +61,41 @@ jobs:
       - name: Create directories
         run: mkdir -p artifacts/license
 
-      - name: Generate Unity activation file
-        uses: game-ci/unity-builder@v4
+      - name: Create Unity activation file
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-          UNITY_TOTP_KEY: ${{ secrets.UNITY_TOTP_KEY }}
-        with:
-          projectPath: .
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: StandaloneLinux64
-          allowDirtyBuild: true
-          buildMethod: UnityEditorInternal.WebServicesUtils.GenerateApplicationIdentifier
-
-      - name: Collect activation file
         run: |
-          alf_file=$(find . -type f -name '*.alf' -print -quit)
-          test -n "$alf_file"
-          cp "$alf_file" artifacts/license/Unity_v${{ env.UNITY_VERSION }}.alf
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/project" \
+            -w /project \
+            -e UNITY_EMAIL \
+            -e UNITY_PASSWORD \
+            -e UNITY_LICENSE \
+            -e UNITY_SERIAL \
+            "unityci/editor:ubuntu-${{ env.UNITY_VERSION }}-base-3" \
+            bash -lc '
+              set -euo pipefail
+              mkdir -p artifacts/license
+              /opt/unity/Editor/Unity \
+                -batchmode \
+                -nographics \
+                -quit \
+                -projectPath /project \
+                -createManualActivationFile \
+                -logFile /project/artifacts/license/create-alf.log
+            '
+
+      - name: Validate activation file
+        run: test -f artifacts/license/Unity_v${{ env.UNITY_VERSION }}.alf || test -f Unity_v${{ env.UNITY_VERSION }}.alf
+
+      - name: Normalize activation file path
+        run: |
+          if [[ -f "Unity_v${{ env.UNITY_VERSION }}.alf" ]]; then
+            mv "Unity_v${{ env.UNITY_VERSION }}.alf" "artifacts/license/Unity_v${{ env.UNITY_VERSION }}.alf"
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -216,7 +232,7 @@ jobs:
     needs:
       - test
       - refresh_license
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped' || needs.refresh_license.result == 'cancelled') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -272,7 +288,7 @@ jobs:
     needs:
       - test
       - refresh_license
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped' || needs.refresh_license.result == 'cancelled') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -328,7 +344,7 @@ jobs:
     needs:
       - test
       - refresh_license
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped') }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped' || needs.refresh_license.result == 'cancelled') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
