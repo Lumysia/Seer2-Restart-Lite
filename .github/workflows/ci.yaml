@@ -1,0 +1,548 @@
+# =============================================================================
+# Seer2 Restart Lite - Unity CI/CD Workflow
+# =============================================================================
+# Unity Version: 2022.3.62f2
+#
+# Required Secrets:
+# - UNITY_LICENSE: Unity license file content (for personal license)
+# - UNITY_EMAIL: Unity account email (for professional license)
+# - UNITY_PASSWORD: Unity account password (for professional license)
+# =============================================================================
+
+name: Unity CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+
+  pull_request:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+
+  workflow_dispatch:
+    inputs:
+      build_android:
+        description: 'Build Android'
+        required: false
+        default: true
+        type: boolean
+      build_windows:
+        description: 'Build Windows'
+        required: false
+        default: true
+        type: boolean
+      build_webgl:
+        description: 'Build WebGL'
+        required: false
+        default: false
+        type: boolean
+      run_tests:
+        description: 'Run Tests'
+        required: false
+        default: true
+        type: boolean
+      build_aab:
+        description: 'Build Android App Bundle (AAB)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  UNITY_VERSION: 2022.3.62f2
+  PROJECT_NAME: Seer2 Restart Lite
+  COMPANY_NAME: Helios
+  ANDROID_PACKAGE: com.Helios.Seer2RestartLite
+  STANDALONE_PACKAGE: com.Helios.Seer2-Restart-Lite
+  BUNDLE_VERSION: lite_3.9.3
+  BUILD_SCENES: Assets/Scenes/Title.unity,Assets/Scenes/Login.unity,Assets/Scenes/Map.unity,Assets/Scenes/Fight.unity,Assets/Scenes/Room.unity,Assets/Scenes/Game.unity
+  ANDROID_MIN_SDK: 22
+  ANDROID_TARGET_SDK: 34
+  ANDROID_TARGET_ARCHITECTURES: ARMv7+ARM64
+  ARTIFACT_RETENTION_DAYS: 14
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  activate-license:
+    name: Activate Unity License
+    runs-on: ubuntu-latest
+    container:
+      image: unityci/editor:ubuntu-2022.3.62f2-android-3
+      options: --user root
+    
+    outputs:
+      license: ${{ steps.license.outputs.license }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+      
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+      
+      - name: Activate Unity License
+        id: license
+        uses: game-ci/unity-license-activate@v2
+        with:
+          unityLicense: ${{ secrets.UNITY_LICENSE }}
+          unityEmail: ${{ secrets.UNITY_EMAIL }}
+          unityPassword: ${{ secrets.UNITY_PASSWORD }}
+          unitySerial: ${{ secrets.UNITY_SERIAL }}
+        continue-on-error: false
+      
+      - name: Verify License Activation
+        run: |
+          echo "License activation completed successfully"
+          echo "Unity version: ${{ env.UNITY_VERSION }}"
+
+  test:
+    name: Run Unity Tests
+    needs: activate-license
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'workflow_dispatch') || 
+      (github.event.inputs.run_tests == 'true')
+    container:
+      image: unityci/editor:ubuntu-2022.3.62f2-android-3
+      options: --user root
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+      
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Test-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+      
+      - name: Restore Unity License
+        uses: game-ci/unity-license-activate@v2
+        with:
+          unityLicense: ${{ secrets.UNITY_LICENSE }}
+          unityEmail: ${{ secrets.UNITY_EMAIL }}
+          unityPassword: ${{ secrets.UNITY_PASSWORD }}
+      
+      - name: Run EditMode Tests
+        id: editmode-tests
+        uses: game-ci/unity-test-runner@v4
+        with:
+          projectPath: .
+          testMode: EditMode
+          artifactsPath: TestResults/EditMode
+          coverageOptions: 'generateAdditionalMetrics;generateHtmlReport'
+          checkTestResults: false
+        continue-on-error: true
+      
+      - name: Run PlayMode Tests
+        id: playmode-tests
+        uses: game-ci/unity-test-runner@v4
+        with:
+          projectPath: .
+          testMode: PlayMode
+          artifactsPath: TestResults/PlayMode
+          coverageOptions: 'generateAdditionalMetrics;generateHtmlReport'
+          checkTestResults: false
+        continue-on-error: true
+      
+      - name: Upload EditMode Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Test-Results-EditMode
+          path: TestResults/EditMode
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+      
+      - name: Upload PlayMode Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Test-Results-PlayMode
+          path: TestResults/PlayMode
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+      
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test Mode | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| EditMode | ${{ steps.editmode-tests.outcome || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PlayMode | ${{ steps.playmode-tests.outcome || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+
+  build-android:
+    name: Build Android
+    needs: activate-license
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'workflow_dispatch') || 
+      (github.event.inputs.build_android == 'true')
+    container:
+      image: unityci/editor:ubuntu-2022.3.62f2-android-3
+      options: --user root
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+      
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+      
+      - name: Restore Unity License
+        uses: game-ci/unity-license-activate@v2
+        with:
+          unityLicense: ${{ secrets.UNITY_LICENSE }}
+          unityEmail: ${{ secrets.UNITY_EMAIL }}
+          unityPassword: ${{ secrets.UNITY_PASSWORD }}
+      
+      - name: Build Android APK
+        id: build-apk
+        uses: game-ci/unity-builder@v4
+        with:
+          targetPlatform: Android
+          projectPath: .
+          buildName: ${{ env.PROJECT_NAME }}
+          buildsPath: build
+          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
+          version: ${{ env.BUNDLE_VERSION }}
+          androidVersionCode: ${{ github.run_number }}
+          androidExportType: androidPackage
+          androidTargetSdkVersion: AndroidApiLevel${{ env.ANDROID_TARGET_SDK }}
+          androidMinSdkVersion: AndroidApiLevel${{ env.ANDROID_MIN_SDK }}
+          androidTargetArchitectures: ${{ env.ANDROID_TARGET_ARCHITECTURES }}
+          androidScriptingBackend: IL2CPP
+          androidCreateSymbols: public
+        env:
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
+      
+      - name: Build Android App Bundle (AAB)
+        id: build-aab
+        if: |
+          (github.event_name == 'workflow_dispatch' && 
+           github.event.inputs.build_aab == 'true') ||
+          (github.event_name == 'push' && 
+           github.ref == 'refs/heads/main')
+        uses: game-ci/unity-builder@v4
+        with:
+          targetPlatform: Android
+          projectPath: .
+          buildName: ${{ env.PROJECT_NAME }}
+          buildsPath: build
+          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
+          version: ${{ env.BUNDLE_VERSION }}
+          androidVersionCode: ${{ github.run_number }}
+          androidExportType: androidAppBundle
+          androidTargetSdkVersion: AndroidApiLevel${{ env.ANDROID_TARGET_SDK }}
+          androidMinSdkVersion: AndroidApiLevel${{ env.ANDROID_MIN_SDK }}
+          androidTargetArchitectures: ${{ env.ANDROID_TARGET_ARCHITECTURES }}
+          androidScriptingBackend: IL2CPP
+        env:
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
+      
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Android-APK
+          path: build/Android/*.apk
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+      
+      - name: Upload Android AAB
+        if: steps.build-aab.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Android-AAB
+          path: build/Android/*.aab
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: warn
+      
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Android Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Android |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | ${{ env.ANDROID_PACKAGE }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ env.BUNDLE_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Code | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Min SDK | ${{ env.ANDROID_MIN_SDK }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target SDK | ${{ env.ANDROID_TARGET_SDK }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Architecture | ${{ env.ANDROID_TARGET_ARCHITECTURES }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | IL2CPP |" >> $GITHUB_STEP_SUMMARY
+
+  build-windows:
+    name: Build Windows (Standalone)
+    needs: activate-license
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name != 'workflow_dispatch') || 
+      (github.event.inputs.build_windows == 'true')
+    container:
+      image: unityci/editor:ubuntu-2022.3.62f2-windows-mono-3
+      options: --user root
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+      
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Windows-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+      
+      - name: Restore Unity License
+        uses: game-ci/unity-license-activate@v2
+        with:
+          unityLicense: ${{ secrets.UNITY_LICENSE }}
+          unityEmail: ${{ secrets.UNITY_EMAIL }}
+          unityPassword: ${{ secrets.UNITY_PASSWORD }}
+      
+      - name: Build StandaloneWindows64
+        id: build-windows
+        uses: game-ci/unity-builder@v4
+        with:
+          targetPlatform: StandaloneWindows64
+          projectPath: .
+          buildName: ${{ env.PROJECT_NAME }}
+          buildsPath: build
+          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
+          version: ${{ env.BUNDLE_VERSION }}
+          scriptingBackend: mono
+          developmentBuild: false
+        env:
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
+      
+      - name: Upload Windows Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Windows-Standalone
+          path: build/StandaloneWindows64/
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+      
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## Windows Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | StandaloneWindows64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | ${{ env.STANDALONE_PACKAGE }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ env.BUNDLE_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | Mono |" >> $GITHUB_STEP_SUMMARY
+
+  build-webgl:
+    name: Build WebGL
+    needs: activate-license
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'workflow_dispatch' && 
+       github.event.inputs.build_webgl == 'true') ||
+      (github.event_name == 'push' && 
+       startsWith(github.ref, 'refs/tags/webgl-'))
+    container:
+      image: unityci/editor:ubuntu-2022.3.62f2-webgl-3
+      options: --user root
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+      
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-WebGL-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+      
+      - name: Restore Unity License
+        uses: game-ci/unity-license-activate@v2
+        with:
+          unityLicense: ${{ secrets.UNITY_LICENSE }}
+          unityEmail: ${{ secrets.UNITY_EMAIL }}
+          unityPassword: ${{ secrets.UNITY_PASSWORD }}
+      
+      - name: Build WebGL
+        id: build-webgl
+        uses: game-ci/unity-builder@v4
+        with:
+          targetPlatform: WebGL
+          projectPath: .
+          buildName: ${{ env.PROJECT_NAME }}
+          buildsPath: build
+          buildMethod: UnityEditor.BuildPipeline.BuildPlayer
+          version: ${{ env.BUNDLE_VERSION }}
+          developmentBuild: false
+          webglCompressionFormat: Brotli
+        env:
+          BUILD_SCENES: ${{ env.BUILD_SCENES }}
+      
+      - name: Upload WebGL Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-WebGL
+          path: build/WebGL/
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: error
+      
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## WebGL Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | WebGL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ env.BUNDLE_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compression | Brotli |" >> $GITHUB_STEP_SUMMARY
+
+  build-addressables:
+    name: Build Addressables Content
+    needs: [activate-license, build-android]
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.build_android == 'true')
+    container:
+      image: unityci/editor:ubuntu-2022.3.62f2-android-3
+      options: --user root
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+      
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Addressables-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-
+      
+      - name: Restore Unity License
+        uses: game-ci/unity-license-activate@v2
+        with:
+          unityLicense: ${{ secrets.UNITY_LICENSE }}
+          unityEmail: ${{ secrets.UNITY_EMAIL }}
+          unityPassword: ${{ secrets.UNITY_PASSWORD }}
+      
+      - name: Build Addressables Content
+        run: |
+          if grep -q "com.unity.addressables" Packages/manifest.json; then
+            echo "Building Addressables content..."
+            unity-editor \
+              -quit \
+              -batchmode \
+              -nographics \
+              -logFile - \
+              -executeMethod UnityEditor.AddressableAssets.Settings.AddressableAssetSettings.BuildPlayerContent \
+              -projectPath .
+          else
+            echo "Addressables package not found, skipping content build"
+          fi
+        continue-on-error: true
+      
+      - name: Upload Addressables Content
+        uses: actions/upload-artifact@v4
+        with:
+          name: Addressables-Content
+          path: |
+            ServerData/
+            AddressableAssets/
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+          if-no-files-found: ignore
+
+  workflow-summary:
+    name: Workflow Summary
+    needs: [test, build-android, build-windows, build-webgl]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Generate Workflow Summary
+        run: |
+          echo "# 🎮 Seer2 Restart Lite - CI Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Unity Version | ${{ env.UNITY_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bundle Version | ${{ env.BUNDLE_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run Number | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered By | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Android Build | ${{ needs.build-android.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows Build | ${{ needs.build-windows.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| WebGL Build | ${{ needs.build-webgl.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Workflow completed at $(date -u +'%Y-%m-%d %H:%M:%S UTC')*" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: Send Notifications
+    needs: [test, build-android, build-windows, build-webgl]
+    if: always() && (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Build Complete
+        run: |
+          echo "Build workflow completed"
+          echo "Check the workflow summary for detailed results"
