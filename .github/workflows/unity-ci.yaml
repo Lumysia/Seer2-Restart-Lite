@@ -166,8 +166,6 @@ jobs:
   test:
     name: Test ${{ matrix.testMode }}
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.runTests }}
-    needs:
-      - refresh_license
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -231,8 +229,7 @@ jobs:
     name: Build Android
     needs:
       - test
-      - refresh_license
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped' || needs.refresh_license.result == 'cancelled') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -287,8 +284,7 @@ jobs:
     name: Build Windows
     needs:
       - test
-      - refresh_license
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped' || needs.refresh_license.result == 'cancelled') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -343,8 +339,7 @@ jobs:
     name: Build WebGL
     needs:
       - test
-      - refresh_license
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped' || needs.refresh_license.result == 'cancelled') }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
