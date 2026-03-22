@@ -113,7 +113,7 @@ jobs:
         uses: actions/setup-node@v4
 
       - name: Install license tools
-        run: npm install --global unity-license-activate
+        run: npm install --global unity-license-activate unity-verify-code
 
       - name: Activate Unity license
         env:
