@@ -1,5 +1,7 @@
 name: Unity CI
 
+run-name: 'Unity CI - ${{ github.event_name }} - ${{ github.ref_name }} - #${{ github.run_number }}'
+
 on:
   push:
     branches:
@@ -41,7 +43,7 @@ defaults:
     shell: bash
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
