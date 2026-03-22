@@ -132,11 +132,14 @@ jobs:
         run: |
           license_file=$(find . -type f -name '*.ulf' -print -quit)
           test -n "$license_file"
-          {
-            echo 'content<<EOF'
-            cat "$license_file"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          from pathlib import Path
+
+          content = Path("$license_file").read_text()
+          print("content<<EOF")
+          print(content, end="" if content.endswith("\n") else "\n")
+          print("EOF")
+          PY
 
       - name: Detect access token availability
         id: access_token
@@ -235,12 +238,59 @@ jobs:
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
           if-no-files-found: ignore
 
-  build_android:
-    name: Build Android
+  build:
+    name: Build ${{ matrix.name }}
     needs:
       - test
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildAndroid && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && matrix.enabled }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Android
+            enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildAndroid }}
+            cacheScope: build-android
+            targetPlatform: Android
+            artifactName: build-android
+            logsArtifactName: build-logs-android
+            buildPath: build/Android
+            logPath: |
+              build/Android/**/*.log
+              build/Android/**/output.log
+              build/Android/**/UnityPlayer*.txt
+          - name: Windows
+            enabled: ${{ github.event_name != 'workflow_dispatch' || inputs.buildWindows }}
+            cacheScope: build-windows
+            targetPlatform: StandaloneWindows64
+            artifactName: build-windows
+            logsArtifactName: build-logs-windows
+            buildPath: build/StandaloneWindows64
+            logPath: |
+              build/StandaloneWindows64/**/*.log
+              build/StandaloneWindows64/**/output.log
+              build/StandaloneWindows64/**/UnityPlayer*.txt
+          - name: WebGL
+            enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildWebGL }}
+            cacheScope: build-webgl
+            targetPlatform: WebGL
+            artifactName: build-webgl
+            logsArtifactName: build-logs-webgl
+            buildPath: build/WebGL
+            logPath: |
+              build/WebGL/**/*.log
+              build/WebGL/**/output.log
+          - name: macOS
+            enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildMacOS }}
+            cacheScope: build-macos
+            targetPlatform: StandaloneOSX
+            artifactName: build-macos
+            logsArtifactName: build-logs-macos
+            buildPath: build/StandaloneOSX
+            logPath: |
+              build/StandaloneOSX/**/*.log
+              build/StandaloneOSX/**/output.log
+              build/StandaloneOSX/**/UnityPlayer*.txt
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -252,12 +302,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Library
-          key: Library-build-android-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
+          key: Library-${{ matrix.cacheScope }}-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
           restore-keys: |
-            Library-build-android-${{ env.UNITY_VERSION }}-
-            Library-build-android-
+            Library-${{ matrix.cacheScope }}-${{ env.UNITY_VERSION }}-
+            Library-${{ matrix.cacheScope }}-
 
-      - name: Build Android player
+      - name: Build ${{ matrix.name }} player
         uses: game-ci/unity-builder@v4
         env:
           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
@@ -267,189 +317,22 @@ jobs:
         with:
           projectPath: .
           unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: Android
+          targetPlatform: ${{ matrix.targetPlatform }}
           buildsPath: build
 
-      - name: Upload Android artifact
+      - name: Upload ${{ matrix.name }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: build-android
-          path: build/Android
+          name: ${{ matrix.artifactName }}
+          path: ${{ matrix.buildPath }}
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
           if-no-files-found: error
 
-      - name: Upload Android logs
+      - name: Upload ${{ matrix.name }} logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-android
-          path: |
-            build/Android/**/*.log
-            build/Android/**/output.log
-            build/Android/**/UnityPlayer*.txt
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-          if-no-files-found: ignore
-
-  build_windows:
-    name: Build Windows
-    needs:
-      - test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          lfs: true
-          fetch-depth: 0
-
-      - name: Cache Library
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-build-windows-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
-          restore-keys: |
-            Library-build-windows-${{ env.UNITY_VERSION }}-
-            Library-build-windows-
-
-      - name: Build Windows player
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        with:
-          projectPath: .
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: StandaloneWindows64
-          buildsPath: build
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-windows
-          path: build/StandaloneWindows64
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-          if-no-files-found: error
-
-      - name: Upload Windows logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs-windows
-          path: |
-            build/StandaloneWindows64/**/*.log
-            build/StandaloneWindows64/**/output.log
-            build/StandaloneWindows64/**/UnityPlayer*.txt
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-          if-no-files-found: ignore
-
-  build_webgl:
-    name: Build WebGL
-    needs:
-      - test
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          lfs: true
-          fetch-depth: 0
-
-      - name: Cache Library
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-build-webgl-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
-          restore-keys: |
-            Library-build-webgl-${{ env.UNITY_VERSION }}-
-            Library-build-webgl-
-
-      - name: Build WebGL player
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        with:
-          projectPath: .
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: WebGL
-          buildsPath: build
-
-      - name: Upload WebGL artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-webgl
-          path: build/WebGL
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-          if-no-files-found: error
-
-      - name: Upload WebGL logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs-webgl
-          path: |
-            build/WebGL/**/*.log
-            build/WebGL/**/output.log
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-          if-no-files-found: ignore
-
-  build_macos:
-    name: Build macOS
-    needs:
-      - test
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildMacOS && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          lfs: true
-          fetch-depth: 0
-
-      - name: Cache Library
-        uses: actions/cache@v4
-        with:
-          path: Library
-          key: Library-build-macos-${{ env.UNITY_VERSION }}-${{ hashFiles('Packages/manifest.json', 'Packages/packages-lock.json', 'ProjectSettings/ProjectVersion.txt') }}
-          restore-keys: |
-            Library-build-macos-${{ env.UNITY_VERSION }}-
-            Library-build-macos-
-
-      - name: Build macOS player
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-        with:
-          projectPath: .
-          unityVersion: ${{ env.UNITY_VERSION }}
-          targetPlatform: StandaloneOSX
-          buildsPath: build
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-macos
-          path: build/StandaloneOSX
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-          if-no-files-found: error
-
-      - name: Upload macOS logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs-macos
-          path: |
-            build/StandaloneOSX/**/*.log
-            build/StandaloneOSX/**/output.log
-            build/StandaloneOSX/**/UnityPlayer*.txt
+          name: ${{ matrix.logsArtifactName }}
+          path: ${{ matrix.logPath }}
           retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
           if-no-files-found: ignore
