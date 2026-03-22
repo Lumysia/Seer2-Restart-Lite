@@ -2,6 +2,8 @@ name: Unity CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
     inputs:
@@ -42,9 +44,102 @@ env:
   ARTIFACT_RETENTION_DAYS: 14
 
 jobs:
+  refresh_license:
+    name: Refresh Unity license
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Create directories
+        run: mkdir -p artifacts/license
+
+      - name: Generate Unity activation file
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_TOTP_KEY: ${{ secrets.UNITY_TOTP_KEY }}
+        with:
+          projectPath: .
+          unityVersion: ${{ env.UNITY_VERSION }}
+          targetPlatform: StandaloneLinux64
+          allowDirtyBuild: true
+          buildMethod: UnityEditorInternal.WebServicesUtils.GenerateApplicationIdentifier
+
+      - name: Collect activation file
+        run: |
+          alf_file=$(find . -type f -name '*.alf' -print -quit)
+          test -n "$alf_file"
+          cp "$alf_file" artifacts/license/Unity_v${{ env.UNITY_VERSION }}.alf
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install license tools
+        run: npm install --global unity-license-activate
+
+      - name: Activate Unity license
+        env:
+          UNITY_TOTP_KEY: ${{ secrets.UNITY_TOTP_KEY }}
+        run: |
+          command=(unity-license-activate "${{ secrets.UNITY_EMAIL }}" "${{ secrets.UNITY_PASSWORD }}" "artifacts/license/Unity_v${{ env.UNITY_VERSION }}.alf")
+
+          if [[ -n "${UNITY_TOTP_KEY:-}" ]]; then
+            command+=(--authenticator-key "$UNITY_TOTP_KEY")
+          fi
+
+          "${command[@]}"
+
+      - name: Read Unity license content
+        id: license_content
+        run: |
+          license_file=$(find . -type f -name '*.ulf' -print -quit)
+          test -n "$license_file"
+          {
+            echo 'content<<EOF'
+            cat "$license_file"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update UNITY_LICENSE with access token
+        id: update_with_access_token
+        if: ${{ secrets.ACCESS_TOKEN != '' }}
+        uses: hmanzur/actions-set-secret@v2.0.0
+        with:
+          name: UNITY_LICENSE
+          value: ${{ steps.license_content.outputs.content }}
+          token: ${{ secrets.ACCESS_TOKEN }}
+
+      - name: Update UNITY_LICENSE with GitHub App token
+        id: update_with_app_token
+        if: ${{ always() && steps.update_with_access_token.outcome == 'failure' && github.token != '' }}
+        uses: hmanzur/actions-set-secret@v2.0.0
+        with:
+          name: UNITY_LICENSE
+          value: ${{ steps.license_content.outputs.content }}
+          token: ${{ github.token }}
+
+      - name: Validate secret update
+        if: ${{ steps.update_with_access_token.outcome != 'success' && steps.update_with_app_token.outcome != 'success' }}
+        run: |
+          echo "Failed to update UNITY_LICENSE with ACCESS_TOKEN and github.token" >&2
+          exit 1
+
   test:
     name: Test ${{ matrix.testMode }}
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.runTests }}
+    needs:
+      - refresh_license
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -106,8 +201,10 @@ jobs:
 
   build_android:
     name: Build Android
-    needs: test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
+    needs:
+      - test
+      - refresh_license
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildAndroid) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -160,8 +257,10 @@ jobs:
 
   build_windows:
     name: Build Windows
-    needs: test
-    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
+    needs:
+      - test
+      - refresh_license
+    if: ${{ always() && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped') && (github.event_name != 'workflow_dispatch' || inputs.buildWindows) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -214,8 +313,10 @@ jobs:
 
   build_webgl:
     name: Build WebGL
-    needs: test
-    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') }}
+    needs:
+      - test
+      - refresh_license
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.buildWebGL && (needs.test.result == 'success' || needs.test.result == 'skipped') && (needs.refresh_license.result == 'success' || needs.refresh_license.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
