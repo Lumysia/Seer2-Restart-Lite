@@ -243,7 +243,6 @@ jobs:
             enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildAndroid }}
             cacheScope: build-android
             targetPlatform: Android
-            versioning: None
             artifactName: build-android
             logsArtifactName: build-logs-android
             buildPath: build/Android
@@ -255,7 +254,6 @@ jobs:
             enabled: ${{ github.event_name != 'workflow_dispatch' || inputs.buildWindows }}
             cacheScope: build-windows
             targetPlatform: StandaloneWindows64
-            versioning: None
             artifactName: build-windows
             logsArtifactName: build-logs-windows
             buildPath: build/StandaloneWindows64
@@ -267,7 +265,6 @@ jobs:
             enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildWebGL }}
             cacheScope: build-webgl
             targetPlatform: WebGL
-            versioning: None
             artifactName: build-webgl
             logsArtifactName: build-logs-webgl
             buildPath: build/WebGL
@@ -278,7 +275,6 @@ jobs:
             enabled: ${{ github.event_name == 'workflow_dispatch' && inputs.buildMacOS }}
             cacheScope: build-macos
             targetPlatform: StandaloneOSX
-            versioning: None
             artifactName: build-macos
             logsArtifactName: build-logs-macos
             buildPath: build/StandaloneOSX
@@ -317,6 +313,7 @@ jobs:
           unityVersion: ${{ env.UNITY_VERSION }}
           targetPlatform: ${{ matrix.targetPlatform }}
           buildsPath: build
+          versioning: None
 
       - name: Upload ${{ matrix.name }} artifact
         if: ${{ matrix.enabled }}
